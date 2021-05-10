@@ -1,7 +1,7 @@
 /*
  * @Author: your name
  * @Date: 2021-05-08 14:18:55
- * @LastEditTime: 2021-05-08 22:42:12
+ * @LastEditTime: 2021-05-10 18:29:27
  * @LastEditors: Please set LastEditors
  * @Description: 
  * @FilePath: /QuickHTTP/tinyhttp/http.cpp
@@ -9,9 +9,10 @@
 
 #include <http.h>
 
+//accept_request(int) 处理从套接字上监听到的一个http请求
 static void* accept_request(void *arg)
 {
-    struct stat st; // ????
+    struct stat st; // stat结构体是用来描述一个linux系统文件中文件属性的结构
     HttpSocketptr socket = (HttpSocketptr)arg;
     socket->parseMethod();
     if(!socket->isPOST() && !socket->isGET())
@@ -26,7 +27,7 @@ static void* accept_request(void *arg)
     socket->parseHeader();
     LOG("content-length: %d", socket->getContentLength);
 
-    char path[512];
+    char path[512]; // 文件的相对路径
     snprintf(path, sizeof(path) - 1, "htdocs%s", socket->getUrl());
     // int snprintf(char *str, size_t size, const char *format, ...)
     // 设将可变参数(...)按照 format 格式化成字符串，并将字符串复制到 str 中，size 为要写入的字符的最大数目，超过 size 会被截断。
@@ -49,9 +50,9 @@ static void* accept_request(void *arg)
         // 不采用cgi
         if(!(socket->cgi()))
         {
-            socket->serveFile(path);
+            socket->serveFile(path); // 静态页面请求，直接返回文件信息给客户端，静态页面返回
         } else {
-            socket->executeCGI(path);
+            socket->executeCGI(path); // 动态页面请求，执行cgi脚本
         }
     }
     socket->close();
@@ -87,10 +88,14 @@ void HttpSocket::serveFile(const char *path)
 
     ::fclose(resource);
 }
-
+// 运行cgi(公共网卡接口)脚本，需要设定合适的环境变量
+/*
+    executeCGI()负责将请求传递给cgi程序处理
+    服务器与cgi之间通过管道pipe通信，首先初始化两个管道，并创建子进程执行cgi函数
+    子进程执行cgi程序,获取cgi的标准输出 通过管道传给父进程，由父进程发送给客户端
+*/
 void HttpSocket::executeCGI(const char* path)
 {
-    // 管道 这里没懂这个cgi是啥呀？
     int cgi_output[2], cgi_input[2];
     pid_t pid;
     int status;
@@ -101,6 +106,7 @@ void HttpSocket::executeCGI(const char* path)
                "Content-Type: text/html\r\n" +
                "\r\n";
     ::send(m_client_fd_, s.c_str(), strlen(s.c_str()), 0);
+    //这里函数原型为int send(SOCKET sock, const char* buf, int len, int flags); 所以这里s 是缓冲区？需要自己加上报头HTTP/1.0 200 200返回成功？？？
 
     //pipe函数定义中的fd参数是一个大小为2的一个数组类型的指针。该函数成功时返回0，并将一对打开的文件描述符值填入fd参数指向的数组。失败时返回 -1并设置errno。
     // 通过pipe函数创建的这两个文件描述符 fd[0] 和 fd[1] 分别构成管道的两端
@@ -122,32 +128,37 @@ void HttpSocket::executeCGI(const char* path)
     }
 
     int content_len = getContentLength();
-    // 运行cgi脚本
+    // 这是子进程， 运行cgi脚本
     if(pid == 0)
     {
         char meth_env[255], query_env[255], length_env[255]; //不清楚这些数组的含义
-        //int dup2(int oldfd, int newfd) 用来复制一个新的fd
-        ::dup2(cgi_output[1], 1);
-        ::dup2(cgi_input[0], 0);
 
-        ::close(cgi_output[0]);
-        ::close(cgi_input[1]);
+        ::dup2(cgi_output[1], 1);   // 1表示stdout, 0表示stdin，将系统标准输出重定向为cgi_output[1]
+        ::dup2(cgi_input[0], 0);    // 将系统标准输入重定向为cgi_input[0]
 
+        ::close(cgi_output[0]);     //关闭cgi_output中的out端
+        ::close(cgi_input[1]);      //关闭cgi_input中的in端
+
+        //cgi需要将请求的方法存储到环境变量中，然后和cgi脚本进行互动
         snprintf(meth_env, sizeof(meth_env) - 1, "REQUEST_METHOD=%s", m_method_);
         putenv(meth_env);
         // putenv()用来改变或增加环境变量的内容. 参数string 的格式为name＝value, 
-        // 如果该环境变量原先存在, 则变量内容会依 value 改变, 否则此参数内容会成为新的环境变量.
         if(isGET())
-        {
+        {   
+            //设置query_string的环境变量
             sprintf(query_env, "QUERY_STRING=%s", m_query_);
             putenv(query_env);
         } else {
+            //设置content_Length的环境变量
             sprintf(length_env, "CONTENT_LENGTH=%d", content_len);
             putenv(length_env);
         }
-        excel(path, path, NULL);
+        execl(path, path, NULL);    //execl函数簇，执行cgi脚本，获取cgi的标准输出作为相应内容发送给客户端
         exit(0);
     } else {
+        /*
+            通过关闭对应管道的端口通道，然后重定向子进程的某端，这样就在父子进程之间构建了一条单双工通道
+        */
         ::close(cgi_output[1]);
         ::close(cgi_input[0]);
 
@@ -189,7 +200,7 @@ void HttpSocket::parseMethod()
         m_buffer_xi_++;
 
     size_t xi = 0;
-    while(!isspace(m_buffer_[m_buffer_xi_]) && (xi < sizeof(m_method_) - 1) && (m_buffer_xi < sizeof(m_buffer_)))
+    while(!isspace(m_buffer_[m_buffer_xi_]) && (xi < sizeof(m_method_) - 1) && (m_buffer_xi_ < sizeof(m_buffer_)))
     {
         m_method_[xi] = m_buffer_[m_buffer_xi_];
         xi++;
@@ -390,10 +401,10 @@ void Http::loop()
             ERROR_DIE("accept");
         }
 
-        HttpdSocketPtr s = newObject();
-        s->setClientFd(fd);
+        HttpSocketptr s = newObject();
+        s->setCientFd(fd);
         s->setClientName(client_name);
-        s->setHttpd(this);
+        s->setHttp(this);
 
         if (pthread_create(&pthread , NULL, accept_request, s) != 0)
         {

@@ -1,7 +1,7 @@
 /*
  * @Author: peng.cao
  * @Date: 2021-05-07 21:02:48
- * @LastEditTime: 2021-05-08 14:16:49
+ * @LastEditTime: 2021-05-10 18:32:36
  * @LastEditors: Please set LastEditors
  * @Description: include http
  * @FilePath: /tinyhttp/http.h
@@ -27,14 +27,16 @@
 using namespace std;
 
 #define SERVER_STRING "Server: http++/1.0.0\r\n"
-#define ERROR_DIE(msg) do 
-    {
-        perror("[ERROR_DIE]" #msg);   //这里我没有完全看懂
+// 这两句话是在干什么？我是没搞懂的
+#define ERROR_DIE(msg)  do              \
+    {                                   \
+        perror("[ERROR_DIE]"#msg);      \
+        exit(1);                        \
     } while(0)
 
-#define ERROR(msg) do
-    {
-        perror("[ERROR]" #msg);
+#define ERROR(msg)      do              \
+    {                                   \
+        perror("[ERROR]"#msg);          \
     } while(0)
 
 #ifdef DEBUG
@@ -51,7 +53,7 @@ class HttpSocket
 {
  public:
     HttpSocket() : m_client_fd_(0), m_buffer_xi_(0),
-        m_query_(NULL), m_buffer_len_(0), m_httpd_(NULL) {}
+        m_query_(NULL), m_buffer_len_(0), m_http_(NULL) {}
     HttpSocket(int fd, struct sockaddr_in &s) : m_client_fd_(fd),
         m_client_name_(s), m_buffer_xi_(0), m_query_(NULL),
         m_buffer_len_(0), m_http_(NULL) {}
@@ -64,6 +66,11 @@ class HttpSocket
     inline void setCientFd(int fd)
     {
         m_client_fd_ = fd;
+    }
+
+    inline void setClientName(struct sockaddr_in &client)
+    {
+        m_client_name_ = client;
     }
 
     inline void setHttp(Http *h)
@@ -247,9 +254,9 @@ private:
 
     map<string, string> m_header_; // 这里m_header_这个map存的是什么？？？不应该是用unordered_map吗？
     Http *m_http_;
-}
+};
 
-typedef HttpSocket *HttpSocketptr;
+typedef HttpSocket* HttpSocketptr;
 
 class Http
 {
@@ -299,4 +306,4 @@ class Http
 private:
     int m_socket_fd_;
     queue<HttpSocketptr> m_queue_;
-}
+};
